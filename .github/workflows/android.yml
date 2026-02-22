@@ -24,15 +24,37 @@ jobs:
         with:
           python-version: "3.10"
 
-      # Instala o Android SDK + sdkmanager no runner
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      # Instala build-tools (contém o AIDL) + platform-tools + platform 33 e aceita licenças
-      - name: Install Android packages
+      # ✅ FIX: garantir que exista cmdline-tools/latest e tools/bin/sdkmanager
+      - name: Fix sdkmanager path for Buildozer
         run: |
-          sdkmanager --install "platform-tools" "platforms;android-33" "build-tools;33.0.2"
-          yes | sdkmanager --licenses
+          set -eux
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          ls -la "$ANDROID_HOME/cmdline-tools" || true
+
+          # Se não existir "latest", cria apontando para a pasta existente (ex: 16.0)
+          if [ ! -d "$ANDROID_HOME/cmdline-tools/latest" ]; then
+            TOOL_DIR=$(ls -1 "$ANDROID_HOME/cmdline-tools" | head -n 1)
+            ln -s "$ANDROID_HOME/cmdline-tools/$TOOL_DIR" "$ANDROID_HOME/cmdline-tools/latest"
+          fi
+
+          # Cria o caminho antigo que o buildozer às vezes tenta usar:
+          sudo mkdir -p "$ANDROID_HOME/tools/bin"
+          sudo ln -sf "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "$ANDROID_HOME/tools/bin/sdkmanager"
+          sudo ln -sf "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" "$ANDROID_HOME/tools/bin/avdmanager"
+
+          "$ANDROID_HOME/tools/bin/sdkmanager" --version
+
+      - name: Install Android packages (platform-tools / build-tools / platform)
+        run: |
+          set -eux
+          yes | "$ANDROID_HOME/tools/bin/sdkmanager" --licenses
+          "$ANDROID_HOME/tools/bin/sdkmanager" --install \
+            "platform-tools" \
+            "platforms;android-33" \
+            "build-tools;33.0.2"
 
       - name: Install system dependencies
         run: |
@@ -51,7 +73,6 @@ jobs:
 
       - name: Build APK (debug)
         env:
-          # Faz o buildozer usar o SDK instalado pelo workflow (evita falhas de download do SDK)
           APP_ANDROID_SDK_PATH: ${{ env.ANDROID_HOME }}
         run: |
           buildozer -v android debug
